@@ -8,6 +8,7 @@ import {
   calculateTargets,
   generateMealPlan,
   goalLabel,
+  validatePlan,
   type Meal,
   type PlanDay,
   type Profile,
@@ -27,7 +28,7 @@ export default function Home() {
   const [selectedDay, setSelectedDay] = useState("Mon");
   const [selectedMeal, setSelectedMeal] = useState<Meal | null>(null);
   const [savedMeals, setSavedMeals] = useState<string[]>([]);
-  const [checked, setChecked] = useState<string[]>([]);
+  const [removedGroceries, setRemovedGroceries] = useState<string[]>([]);
 
   function finishOnboarding(nextProfile: Profile) {
     const nextTargets = calculateTargets(nextProfile);
@@ -36,7 +37,7 @@ export default function Home() {
     setPlan(generateMealPlan(nextProfile, nextTargets));
     setPlanSeed(0);
     setSelectedDay("Mon");
-    setChecked([]);
+    setRemovedGroceries([]);
     setStage("review");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -50,6 +51,7 @@ export default function Home() {
   }
 
   function approvePlan() {
+    if (!profile || !targets || !validatePlan(profile, targets, plan).valid) return;
     setStage("app");
     setPage("today");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -57,7 +59,7 @@ export default function Home() {
 
   function editProfile() {
     setStage("onboarding");
-    setChecked([]);
+    setRemovedGroceries([]);
   }
 
   function saveMeal(mealName: string) {
@@ -71,12 +73,13 @@ export default function Home() {
   if (!profile || !targets || plan.length === 0) return null;
 
   if (stage === "review") {
-    return <PlanReview profile={profile} targets={targets} plan={plan} selectedDay={selectedDay} setSelectedDay={setSelectedDay} onMeal={setSelectedMeal} onEdit={editProfile} onRegenerate={regeneratePlan} onApprove={approvePlan} selectedMeal={selectedMeal} closeMeal={() => setSelectedMeal(null)} />;
+    return <PlanReview profile={profile} targets={targets} plan={plan} validation={validatePlan(profile, targets, plan)} selectedDay={selectedDay} setSelectedDay={setSelectedDay} onMeal={setSelectedMeal} onEdit={editProfile} onRegenerate={regeneratePlan} onApprove={approvePlan} selectedMeal={selectedMeal} closeMeal={() => setSelectedMeal(null)} />;
   }
 
   const today = plan[0];
   const groceries = buildGroceryList(plan);
   const groceryCount = groceries.reduce((total, group) => total + group.items.length, 0);
+  const includedGroceryCount = groceryCount - removedGroceries.length;
   const dayCalories = sum(today.meals, "calories");
   const dayProtein = sum(today.meals, "protein");
   const calorieFit = Math.round((dayCalories / targets.calories) * 100);
@@ -92,7 +95,7 @@ export default function Home() {
       <aside className="sidebar">
         <button className="brand" onClick={() => setPage("today")}><span className="brand-mark">✳</span> NutriPlan</button>
         <nav aria-label="Primary navigation">
-          {navItems.map((item) => <button className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => setPage(item.id)} key={item.id}><span>{item.icon}</span>{item.label}{item.id === "groceries" && <b>{groceryCount - checked.length}</b>}</button>)}
+          {navItems.map((item) => <button className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => setPage(item.id)} key={item.id}><span>{item.icon}</span>{item.label}{item.id === "groceries" && <b>{includedGroceryCount}</b>}</button>)}
         </nav>
         <div className="sidebar-note"><span className="tiny-label">APPROVED PLAN</span><strong>{goalLabel(profile.goal)}</strong><p>{targets.calories.toLocaleString()} kcal · {targets.protein}g protein</p></div>
         <button className="profile" onClick={editProfile}><span>{profile.name.slice(0, 2).toUpperCase()}</span><span>{profile.name}<small>Edit onboarding</small></span><i>···</i></button>
@@ -133,9 +136,16 @@ export default function Home() {
 
         {page === "groceries" && (
           <section className="page-view">
-            <header className="topbar"><div><span className="eyebrow">FROM APPROVED PLAN</span><h1>Your grocery list</h1><p className="lede">{checked.length} of {groceryCount} items checked. Editing the meal plan requires reapproval before this list changes.</p></div><span className="total-pill">{budgetLabel(profile)} target</span></header>
+            <header className="topbar"><div><span className="eyebrow">FROM APPROVED PLAN</span><h1>Your grocery list</h1><p className="lede" aria-live="polite">All {groceryCount} items start included. Remove only what you already have or don&apos;t want.{removedGroceries.length > 0 ? ` ${removedGroceries.length} removed.` : ""}</p></div><span className="total-pill">{includedGroceryCount} included</span></header>
             <div className="grocery-layout">
-              <div className="grocery-groups">{groceries.map((group) => <article className="grocery-group" key={group.group}><div className="group-heading"><h2>{group.group}</h2><span>{group.items.length} items</span></div>{group.items.map((item) => <label className={checked.includes(item.name) ? "checked" : ""} key={item.name}><input type="checkbox" checked={checked.includes(item.name)} onChange={() => setChecked((current) => current.includes(item.name) ? current.filter((value) => value !== item.name) : [...current, item.name])}/><i>✓</i><span><strong>{item.name}</strong><small>{item.quantity}</small></span></label>)}</article>)}</div>
+              <div className="grocery-groups">{groceries.map((group) => {
+                const includedInGroup = group.items.filter((item) => !removedGroceries.includes(`${group.group}:${item.name}`)).length;
+                return <article className="grocery-group" key={group.group}><div className="group-heading"><h2>{group.group}</h2><span>{includedInGroup} of {group.items.length} included</span></div>{group.items.map((item) => {
+                  const itemId = `${group.group}:${item.name}`;
+                  const isRemoved = removedGroceries.includes(itemId);
+                  return <div className={`grocery-item ${isRemoved ? "removed" : ""}`} key={item.name}><i aria-hidden="true">{isRemoved ? "−" : "✓"}</i><span><strong>{item.name}</strong><small>{item.quantity} · {isRemoved ? "Removed" : "Included"}</small></span><button type="button" aria-pressed={isRemoved} onClick={() => setRemovedGroceries((current) => current.includes(itemId) ? current.filter((value) => value !== itemId) : [...current, itemId])}>{isRemoved ? "Undo" : "Remove"}</button></div>;
+                })}</article>;
+              })}</div>
               <aside className="retailer-card"><span className="retailer-logo">i</span><div><span className="eyebrow">NEXT INTEGRATION</span><h2>Ready for product matching</h2><p>The approved ingredient list is now normalized for an Instacart MCP search and cart-building pass.</p></div><div className="readiness"><span>Profile constraints</span><b>Applied</b><span>Meal approval</span><b>Complete</b><span>Product matching</span><b className="waiting">Next</b></div><button disabled>Connect Instacart MCP</button><small>Store pricing and purchases remain outside this version.</small></aside>
             </div>
           </section>
@@ -155,7 +165,7 @@ export default function Home() {
   );
 }
 
-function PlanReview({ profile, targets, plan, selectedDay, setSelectedDay, onMeal, onEdit, onRegenerate, onApprove, selectedMeal, closeMeal }: { profile: Profile; targets: Targets; plan: PlanDay[]; selectedDay: string; setSelectedDay: (day: string) => void; onMeal: (meal: Meal) => void; onEdit: () => void; onRegenerate: () => void; onApprove: () => void; selectedMeal: Meal | null; closeMeal: () => void }) {
+function PlanReview({ profile, targets, plan, validation, selectedDay, setSelectedDay, onMeal, onEdit, onRegenerate, onApprove, selectedMeal, closeMeal }: { profile: Profile; targets: Targets; plan: PlanDay[]; validation: ReturnType<typeof validatePlan>; selectedDay: string; setSelectedDay: (day: string) => void; onMeal: (meal: Meal) => void; onEdit: () => void; onRegenerate: () => void; onApprove: () => void; selectedMeal: Meal | null; closeMeal: () => void }) {
   const weeklyAverage = Math.round(plan.reduce((total, item) => total + sum(item.meals, "calories"), 0) / plan.length);
   const averageProtein = Math.round(plan.reduce((total, item) => total + sum(item.meals, "protein"), 0) / plan.length);
   const matchingDays = plan.filter((item) => Math.abs(sum(item.meals, "calories") - targets.calories) <= Math.max(100, targets.calories * .05)).length;
@@ -188,9 +198,11 @@ function PlanReview({ profile, targets, plan, selectedDay, setSelectedDay, onMea
 
         <PlanWorkspace plan={plan} targets={targets} selectedDay={selectedDay} onSelectDay={setSelectedDay} onOpenMeal={onMeal} />
 
+        {!validation.valid && <section className="plan-audit" role="alert"><strong>Plan needs correction before grocery approval</strong><ul>{validation.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul><button className="outline-btn" onClick={onEdit}>Edit profile and constraints</button></section>}
+
         <section className="approval-card">
           <div className="approval-copy"><span className="approval-check">✓</span><div><span className="eyebrow">NEXT STEP</span><h2>Ready to turn this into groceries?</h2><p>Approving locks this version and creates one consolidated grocery list. Nothing is ordered yet.</p></div></div>
-          <div className="approval-actions"><button className="outline-btn" onClick={onRegenerate}>Generate a different week</button><button className="approve-btn" onClick={onApprove}>Approve week & create groceries →</button></div>
+          <div className="approval-actions"><button className="outline-btn" onClick={onRegenerate}>Generate a different week</button><button className="approve-btn" onClick={onApprove} disabled={!validation.valid}>Approve week & create groceries →</button></div>
         </section>
       </section>
 
