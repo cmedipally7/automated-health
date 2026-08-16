@@ -4,6 +4,7 @@ import { useState, type CSSProperties } from "react";
 import Onboarding from "./onboarding";
 import {
   budgetLabel,
+  buildGroceryHandoff,
   buildGroceryList,
   calculateTargets,
   generateMealPlan,
@@ -29,6 +30,7 @@ export default function Home() {
   const [selectedMeal, setSelectedMeal] = useState<Meal | null>(null);
   const [savedMeals, setSavedMeals] = useState<string[]>([]);
   const [removedGroceries, setRemovedGroceries] = useState<string[]>([]);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
 
   function finishOnboarding(nextProfile: Profile) {
     const nextTargets = calculateTargets(nextProfile);
@@ -38,6 +40,7 @@ export default function Home() {
     setPlanSeed(0);
     setSelectedDay("Mon");
     setRemovedGroceries([]);
+    setCopyStatus("idle");
     setStage("review");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -48,6 +51,8 @@ export default function Home() {
     setPlanSeed(nextSeed);
     setPlan(generateMealPlan(profile, targets, nextSeed));
     setSelectedDay("Mon");
+    setRemovedGroceries([]);
+    setCopyStatus("idle");
   }
 
   function approvePlan() {
@@ -60,6 +65,7 @@ export default function Home() {
   function editProfile() {
     setStage("onboarding");
     setRemovedGroceries([]);
+    setCopyStatus("idle");
   }
 
   function saveMeal(mealName: string) {
@@ -78,8 +84,11 @@ export default function Home() {
 
   const today = plan[0];
   const groceries = buildGroceryList(plan);
-  const groceryCount = groceries.reduce((total, group) => total + group.items.length, 0);
+  const groceryItems = groceries.flatMap((group) => group.items);
+  const groceryCount = groceryItems.length;
   const includedGroceryCount = groceryCount - removedGroceries.length;
+  const groceryHandoff = buildGroceryHandoff(profile, groceryItems, removedGroceries);
+  const groceryHandoffJson = JSON.stringify(groceryHandoff, null, 2);
   const dayCalories = sum(today.meals, "calories");
   const dayProtein = sum(today.meals, "protein");
   const calorieFit = Math.round((dayCalories / targets.calories) * 100);
@@ -89,6 +98,32 @@ export default function Home() {
     { id: "groceries", label: "Groceries", icon: "◫" },
     { id: "progress", label: "Progress", icon: "↗" },
   ];
+
+  function toggleRemoved(itemId: string) {
+    setRemovedGroceries((current) => current.includes(itemId)
+      ? current.filter((value) => value !== itemId)
+      : [...current, itemId]);
+    setCopyStatus("idle");
+  }
+
+  async function copyGroceryHandoff() {
+    try {
+      await navigator.clipboard.writeText(groceryHandoffJson);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("error");
+    }
+  }
+
+  function downloadGroceryHandoff() {
+    const blob = new Blob([groceryHandoffJson], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "nutriplan-instacart-handoff.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <main className="app-shell">
@@ -123,7 +158,7 @@ export default function Home() {
               </article>
             </section>
             <MealsSection title="Meals for Monday" eyebrow="YOUR APPROVED DAY" meals={today.meals} savedMeals={savedMeals} onSave={saveMeal} onOpen={setSelectedMeal} onFullWeek={() => setPage("plan")} />
-            <section className="grocery-strip"><div className="basket">◫</div><div><span className="eyebrow">GENERATED FROM YOUR PLAN</span><h3>{groceryCount} consolidated grocery items</h3><p>Only ingredients from approved meals, grouped and quantity-normalized.</p></div><div className="grocery-total"><span>Budget target</span><strong>{budgetLabel(profile)}</strong></div><button className="primary-btn" onClick={() => setPage("groceries")}>Review grocery list →</button></section>
+            <section className="grocery-strip"><div className="basket">◫</div><div><span className="eyebrow">GENERATED FROM YOUR PLAN</span><h3>{groceryCount} minimum grocery requirements</h3><p>Review what you already have before an AI shopping agent matches products and packages.</p></div><div className="grocery-total"><span>Budget target</span><strong>{budgetLabel(profile)}</strong></div><button className="primary-btn" onClick={() => setPage("groceries")}>Review pantry & groceries →</button></section>
           </>
         )}
 
@@ -138,17 +173,20 @@ export default function Home() {
 
         {page === "groceries" && (
           <section className="page-view">
-            <header className="topbar"><div><span className="eyebrow">FROM APPROVED PLAN</span><h1>Your grocery list</h1><p className="lede" aria-live="polite">All {groceryCount} items start included. Remove only what you already have or don&apos;t want.{removedGroceries.length > 0 ? ` ${removedGroceries.length} removed.` : ""}</p></div><span className="total-pill">{includedGroceryCount} included</span></header>
+            <header className="topbar"><div><span className="eyebrow">FROM APPROVED PLAN · THEN PRODUCT MATCHING</span><h1>Your grocery list.</h1><p className="lede" aria-live="polite">All {groceryCount} items start included. Remove only what you already have or don&apos;t want.{removedGroceries.length > 0 ? ` ${removedGroceries.length} removed.` : ""}</p></div><span className="total-pill">{includedGroceryCount} included</span></header>
             <div className="grocery-layout">
-              <div className="grocery-groups">{groceries.map((group) => {
-                const includedInGroup = group.items.filter((item) => !removedGroceries.includes(`${group.group}:${item.name}`)).length;
-                return <article className="grocery-group" key={group.group}><div className="group-heading"><h2>{group.group}</h2><span>{includedInGroup} of {group.items.length} included</span></div>{group.items.map((item) => {
-                  const itemId = `${group.group}:${item.name}`;
-                  const isRemoved = removedGroceries.includes(itemId);
-                  return <div className={`grocery-item ${isRemoved ? "removed" : ""}`} key={item.name}><i aria-hidden="true">{isRemoved ? "−" : "✓"}</i><span><strong>{item.name}</strong><small>{item.quantity} · {isRemoved ? "Removed" : "Included"}</small></span><button type="button" aria-pressed={isRemoved} onClick={() => setRemovedGroceries((current) => current.includes(itemId) ? current.filter((value) => value !== itemId) : [...current, itemId])}>{isRemoved ? "Undo" : "Remove"}</button></div>;
-                })}</article>;
-              })}</div>
-              <aside className="retailer-card"><span className="retailer-logo">i</span><div><span className="eyebrow">NEXT INTEGRATION</span><h2>Ready for product matching</h2><p>The approved ingredient list is now normalized for an Instacart MCP search and cart-building pass.</p></div><div className="readiness"><span>Profile constraints</span><b>Applied</b><span>Meal approval</span><b>Complete</b><span>Product matching</span><b className="waiting">Next</b></div><button disabled>Connect Instacart MCP</button><small>Store pricing and purchases remain outside this version.</small></aside>
+              <div className="grocery-groups">
+                <div className="minimum-notice"><span>↓</span><div><strong>These are minimum recipe requirements—not package recommendations.</strong><p>The shopping agent must choose enough product packages to cover each amount, then optimize total price, unit value, and unnecessary overage.</p></div></div>
+                <div className="inventory-summary"><div><span className="eyebrow">QUICK REVIEW</span><strong>{includedGroceryCount} included · {removedGroceries.length} removed</strong></div><button className="text-btn" disabled={removedGroceries.length === 0} onClick={() => { setRemovedGroceries([]); setCopyStatus("idle"); }}>Restore all items</button></div>
+                {groceries.map((group) => {
+                  const includedInGroup = group.items.filter((item) => !removedGroceries.includes(item.id)).length;
+                  return <article className="grocery-group" key={group.group}><div className="group-heading"><h2>{group.group}</h2><span>{includedInGroup} of {group.items.length} included</span></div>{group.items.map((item) => {
+                    const isRemoved = removedGroceries.includes(item.id);
+                    return <div className={`grocery-item ${isRemoved ? "removed" : ""}`} key={item.id}><i aria-hidden="true">{isRemoved ? "−" : "✓"}</i><span><strong>{item.name}</strong><small>Minimum needed · {item.displayQuantity} · {isRemoved ? "Removed" : "Included"}</small></span><button type="button" aria-pressed={isRemoved} onClick={() => toggleRemoved(item.id)}>{isRemoved ? "Undo" : "Remove"}</button></div>;
+                  })}</article>;
+                })}
+              </div>
+              <aside className="retailer-card"><span className="retailer-logo">{includedGroceryCount}</span><div><span className="eyebrow">AI SHOPPING HANDOFF</span><h2>{includedGroceryCount === 0 ? "Nothing left to buy" : `${includedGroceryCount} items ready to match`}</h2><p>The payload excludes every removed item and preserves numeric minimums for future product and package matching.</p></div><div className="readiness"><span>Dietary constraints</span><b>Applied</b><span>Minimum coverage</span><b>Required</b><span>Removed items</span><b>{removedGroceries.length}</b><span>Value optimization</span><b>Requested</b><span>Instacart connection</span><b className="waiting">Next</b></div><div className="handoff-actions"><button className="copy-handoff" onClick={copyGroceryHandoff}>{copyStatus === "copied" ? "Copied JSON ✓" : "Copy AI handoff JSON"}</button><button className="download-handoff" onClick={downloadGroceryHandoff}>Download .json</button></div><p className={`copy-status ${copyStatus}`} aria-live="polite">{copyStatus === "error" ? "Clipboard unavailable—use the download instead." : copyStatus === "copied" ? "Ready to paste into an AI shopping workflow." : ""}</p><details className="json-preview"><summary>Preview handoff payload</summary><pre>{groceryHandoffJson}</pre></details><small>No store search, cart change, or purchase happens in this version.</small></aside>
             </div>
           </section>
         )}
