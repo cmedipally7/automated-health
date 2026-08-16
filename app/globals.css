@@ -108,6 +108,14 @@ h2,h3,p { margin-top:0; }
 .total-pill { padding:10px 14px; border-radius:99px; color:var(--forest); background:#e3f0e2; font-size:12px; font-weight:800; }
 .grocery-layout { display:grid; grid-template-columns:1.5fr .8fr; align-items:start; gap:24px; margin-top:34px; }
 .grocery-groups { display:grid; gap:16px; }
+.minimum-notice { display:flex; align-items:flex-start; gap:14px; padding:18px 20px; border:1px solid #c8ddca; border-radius:17px; background:#edf7ec; }
+.minimum-notice>span { display:grid; place-items:center; width:34px; height:34px; flex:0 0 auto; border-radius:11px; color:white; background:var(--green); font-size:17px; font-weight:800; }
+.minimum-notice strong { color:var(--forest); font-size:13px; }
+.minimum-notice p { margin:5px 0 0; color:var(--muted); font-size:11px; line-height:1.5; }
+.inventory-summary { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:2px 4px; }
+.inventory-summary>div { display:grid; gap:6px; }
+.inventory-summary strong { color:var(--forest); font-size:15px; }
+.inventory-summary .text-btn { font-size:10px; }
 .grocery-group { overflow:hidden; border:1px solid var(--line); border-radius:18px; background:white; }
 .group-heading { display:flex; justify-content:space-between; align-items:center; padding:18px 20px; border-bottom:1px solid var(--line); background:#f7faf6; }
 .group-heading h2 { margin:0; color:var(--forest); font-family:Georgia,serif; font-size:18px; }
@@ -117,12 +125,14 @@ h2,h3,p { margin-top:0; }
 .grocery-group label:hover { background:#fbfdf9; }
 .grocery-group input { position:absolute; opacity:0; pointer-events:none; }
 .grocery-group label>i { display:grid; place-items:center; width:22px; height:22px; border:1px solid #b9c6bb; border-radius:6px; color:transparent; font-style:normal; font-size:11px; }
-.grocery-group label.checked>i { color:white; background:var(--green); border-color:var(--green); }
 .grocery-group label>span { display:grid; gap:2px; }
 .grocery-group label strong { color:var(--forest); font-size:13px; }
 .grocery-group label small { color:var(--muted); font-size:10px; }
-.grocery-group label.checked strong { color:#8a938b; text-decoration:line-through; }
-.grocery-group label>button { border:0; background:transparent; color:#9aa19b; }
+.grocery-group label>em { padding:6px 9px; border-radius:99px; color:#496d4e; background:#edf5eb; font-size:9px; font-style:normal; font-weight:800; }
+.grocery-group label.on-hand { background:#f7f8f5; }
+.grocery-group label.on-hand>i { color:white; background:var(--green); border-color:var(--green); }
+.grocery-group label.on-hand strong { color:#8a938b; text-decoration:line-through; }
+.grocery-group label.on-hand>em { color:#747d75; background:#e5e9e3; }
 .retailer-card { position:sticky; top:28px; display:grid; gap:18px; padding:26px; border-radius:21px; color:white; background:var(--forest); }
 .retailer-logo { display:grid; place-items:center; width:43px; height:43px; color:var(--forest); background:#dcede0; border-radius:13px; font-family:Georgia,serif; font-size:24px; font-weight:800; }
 .retailer-card .eyebrow { color:#a9c0ad; }
@@ -132,7 +142,17 @@ h2,h3,p { margin-top:0; }
 .readiness span { color:#b7c9ba; }
 .readiness b { color:#cfe6d0; }
 .readiness b.waiting { color:#e2c682; }
-.retailer-card>button { padding:13px; border:0; border-radius:12px; color:#677569; background:#d9e5da; font-size:11px; font-weight:800; cursor:not-allowed; }
+.handoff-actions { display:grid; gap:8px; }
+.handoff-actions button { width:100%; padding:12px; border-radius:11px; font-size:10px; font-weight:800; }
+.copy-handoff { border:0; color:var(--forest); background:#d9edd9; }
+.copy-handoff:hover { background:#c9e4cb; }
+.download-handoff { border:1px solid #587760; color:#e3eee4; background:transparent; }
+.download-handoff:hover { background:#264e32; }
+.copy-status { min-height:14px; margin:-10px 0 0!important; color:#bcd0bf!important; font-size:9px!important; text-align:center; }
+.copy-status.error { color:#f0c8aa!important; }
+.json-preview { overflow:hidden; border:1px solid #42644b; border-radius:12px; }
+.json-preview summary { padding:11px 12px; color:#c1d2c3; font-size:9px; font-weight:800; cursor:pointer; }
+.json-preview pre { max-height:260px; overflow:auto; margin:0; padding:12px; border-top:1px solid #42644b; color:#dbe8dc; background:#11331f; font-family:var(--font-geist-mono),monospace; font-size:8px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
 .retailer-card>small { color:#9fb5a3; font-size:9px; text-align:center; }
 .progress-grid { display:grid; grid-template-columns:1.5fr 1fr; gap:22px; margin-top:34px; }
 .progress-chart,.consistency-card { padding:27px; border:1px solid var(--line); border-radius:21px; background:white; }

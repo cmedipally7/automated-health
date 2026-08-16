@@ -54,7 +54,46 @@ export type Meal = {
 };
 
 export type PlanDay = { day: string; date: number; meals: Meal[] };
-export type GroceryGroup = { group: string; items: { name: string; quantity: string }[] };
+export type GroceryItem = {
+  id: string;
+  name: string;
+  category: Ingredient["category"];
+  minimumQuantity: number;
+  unit: string;
+  displayQuantity: string;
+};
+
+export type GroceryGroup = { group: Ingredient["category"]; items: GroceryItem[] };
+
+export type GroceryHandoff = {
+  schemaVersion: "1.0";
+  intent: "build_grocery_cart";
+  destination: "instacart_mcp";
+  constraints: {
+    diet: Diet;
+    allergies: string[];
+    standards: string[];
+    weeklyBudget: {
+      currency: "USD";
+      minimum?: number;
+      maximum?: number;
+      target?: number;
+    };
+  };
+  quantityPolicy: {
+    quantitiesAre: "minimum_required_for_approved_meal_plan";
+    coverageRule: string;
+    packageOverageAllowed: true;
+  };
+  optimization: {
+    goal: "best_value_with_complete_coverage";
+    priorities: string[];
+  };
+  inventoryReview: {
+    excludedAsAlreadyOnHand: Array<Pick<GroceryItem, "id" | "name" | "minimumQuantity" | "unit">>;
+  };
+  items: Array<Pick<GroceryItem, "id" | "name" | "category" | "minimumQuantity" | "unit">>;
+};
 
 export const defaultProfile: Profile = {
   name: "",
@@ -278,22 +317,91 @@ export function buildGroceryList(plan: PlanDay[]): GroceryGroup[] {
     }
   }
 
-  const categoryOrder = ["Produce", "Protein & dairy", "Grains", "Pantry"];
+  const categoryOrder: Ingredient["category"][] = ["Produce", "Protein & dairy", "Grains", "Pantry"];
   return categoryOrder.map((category) => ({
     group: category,
     items: [...totals.values()]
       .filter((item) => item.category === category)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((item) => ({
+        id: groceryItemId(item.category, item.name, item.unit),
         name: item.name,
-        quantity: formatQuantity(item.quantity, item.unit),
+        category: item.category as Ingredient["category"],
+        minimumQuantity: normalizeQuantity(item.quantity),
+        unit: item.unit,
+        displayQuantity: formatQuantity(item.quantity, item.unit),
       })),
   })).filter((group) => group.items.length > 0);
 }
 
+export function buildGroceryHandoff(
+  profile: Profile,
+  items: GroceryItem[],
+  onHandIds: string[],
+): GroceryHandoff {
+  const onHand = new Set(onHandIds);
+  const toRequirement = ({ id, name, category, minimumQuantity, unit }: GroceryItem) => ({
+    id,
+    name,
+    category,
+    minimumQuantity,
+    unit,
+  });
+  const excludedAsAlreadyOnHand = items
+    .filter((item) => onHand.has(item.id))
+    .map(({ id, name, minimumQuantity, unit }) => ({ id, name, minimumQuantity, unit }));
+
+  return {
+    schemaVersion: "1.0",
+    intent: "build_grocery_cart",
+    destination: "instacart_mcp",
+    constraints: {
+      diet: profile.diet,
+      allergies: [...profile.allergies, profile.customAllergy.trim()].filter(Boolean),
+      standards: profile.standards,
+      weeklyBudget: budgetConstraint(profile),
+    },
+    quantityPolicy: {
+      quantitiesAre: "minimum_required_for_approved_meal_plan",
+      coverageRule: "Selected product packages must meet or exceed every remaining minimum quantity.",
+      packageOverageAllowed: true,
+    },
+    optimization: {
+      goal: "best_value_with_complete_coverage",
+      priorities: [
+        "cover_every_remaining_minimum",
+        "respect_dietary_constraints",
+        "minimize_total_cart_price",
+        "prefer_better_unit_value_when_practical",
+        "minimize_unnecessary_package_overage",
+      ],
+    },
+    inventoryReview: { excludedAsAlreadyOnHand },
+    items: items.filter((item) => !onHand.has(item.id)).map(toRequirement),
+  };
+}
+
+function groceryItemId(category: string, name: string, unit: string) {
+  return `${category}:${name}:${unit}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function budgetConstraint(profile: Profile): GroceryHandoff["constraints"]["weeklyBudget"] {
+  if (profile.budget === "custom") {
+    return { currency: "USD", target: profile.customBudget };
+  }
+
+  const amounts = profile.budget.match(/\d+/g)?.map(Number) ?? [];
+  return amounts.length > 1
+    ? { currency: "USD", minimum: amounts[0], maximum: amounts[1] }
+    : { currency: "USD", minimum: amounts[0] };
+}
+
+function normalizeQuantity(quantity: number) {
+  return Number(quantity.toFixed(2));
+}
+
 function formatQuantity(quantity: number, unit: string) {
-  const rounded = quantity >= 10 ? Math.round(quantity) : Number(quantity.toFixed(1));
-  return `${rounded} ${unit}`;
+  return `${normalizeQuantity(quantity)} ${unit}`;
 }
 
 export function goalLabel(goal: Goal) {
@@ -301,5 +409,5 @@ export function goalLabel(goal: Goal) {
 }
 
 export function budgetLabel(profile: Profile) {
-  return profile.budget === "custom" ? `$${profile.customBudget}/week` : `$${profile.budget}/week`;
+  return profile.budget === "custom" ? `$${profile.customBudget}/week` : `${profile.budget}/week`;
 }
