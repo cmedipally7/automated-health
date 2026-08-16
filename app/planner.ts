@@ -9,6 +9,8 @@ export type Profile = {
   goal: Goal;
   weightLossMethod: WeightLossMethod;
   psmfClinicianApproved: boolean;
+  psmfCalories: number;
+  psmfProtein: number;
   age: number;
   sex: Sex;
   heightCm: number;
@@ -35,7 +37,7 @@ export type Targets = {
   projectedKg: number;
   method: WeightLossMethod;
   clinicalSupervisionRequired: boolean;
-  proteinBasisKg: number;
+  targetSource: "estimated" | "clinician";
 };
 
 export type Ingredient = {
@@ -108,6 +110,8 @@ export const defaultProfile: Profile = {
   goal: "lose",
   weightLossMethod: "steady",
   psmfClinicianApproved: false,
+  psmfCalories: 0,
+  psmfProtein: 0,
   age: 35,
   sex: "male",
   heightCm: 175,
@@ -133,23 +137,21 @@ export function calculateTargets(profile: Profile): Targets {
   const sexAdjustment = profile.sex === "female" ? -161 : 5;
   const bmr = 10 * profile.weightKg + 6.25 * profile.heightCm - 5 * profile.age + sexAdjustment;
   const maintenance = Math.round(bmr * activityMultipliers[profile.activity]);
-  const isPsmf = profile.goal === "lose" && profile.weightLossMethod === "psmf" && profile.psmfClinicianApproved;
+  const isPsmf = profile.goal === "lose"
+    && profile.weightLossMethod === "psmf"
+    && profile.psmfClinicianApproved
+    && profile.psmfCalories > 0
+    && profile.psmfProtein > 0;
   const requestedDeficit = (profile.paceKg * 7700) / 7;
   const safeDeficit = Math.min(requestedDeficit, maintenance * 0.2, 750);
   const floor = profile.sex === "female" ? 1200 : 1500;
-  // PSMF protein is calculated from estimated ideal body weight, not current body weight.
-  // This remains a clinician-supervised VLCD pathway; see the onboarding gate.
-  const idealWeightKg = profile.sex === "male"
-    ? 50 + 2.3 * Math.max(0, profile.heightCm / 2.54 - 60)
-    : 45.5 + 2.3 * Math.max(0, profile.heightCm / 2.54 - 60);
-  const proteinBasisKg = isPsmf ? idealWeightKg : profile.weightKg;
-  const proteinPerKg = isPsmf ? 1.5 : profile.goal === "maintain" ? 1.4 : 1.7;
-  const protein = Math.round(proteinBasisKg * proteinPerKg);
+  const proteinPerKg = profile.goal === "maintain" ? 1.4 : 1.7;
+  const protein = isPsmf ? Math.round(profile.psmfProtein) : Math.round(profile.weightKg * proteinPerKg);
   const calories = isPsmf
-    ? 800
+    ? Math.round(profile.psmfCalories)
     : Math.max(floor, Math.round((maintenance + (profile.goal === "lose" ? -safeDeficit : profile.goal === "gain" ? 300 : 0)) / 25) * 25);
-  const fat = isPsmf ? 20 : Math.round((calories * 0.28) / 9);
-  const carbs = isPsmf ? 20 : Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
+  const fat = isPsmf ? 0 : Math.round((calories * 0.28) / 9);
+  const carbs = isPsmf ? 0 : Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
   const dailyAdjustment = isPsmf ? calories - maintenance : profile.goal === "lose" ? -safeDeficit : profile.goal === "gain" ? 300 : 0;
 
   return {
@@ -158,12 +160,12 @@ export function calculateTargets(profile: Profile): Targets {
     protein,
     carbs,
     fat,
-    fiber: isPsmf ? 20 : Math.max(25, Math.round((calories / 1000) * 14)),
+    fiber: isPsmf ? 0 : Math.max(25, Math.round((calories / 1000) * 14)),
     dailyAdjustment: Math.round(dailyAdjustment),
-    projectedKg: profile.goal === "lose" ? Number((((isPsmf ? maintenance - calories : safeDeficit) * 7) / 7700).toFixed(2)) : 0,
+    projectedKg: profile.goal === "lose" && !isPsmf ? Number(((safeDeficit * 7) / 7700).toFixed(2)) : 0,
     method: isPsmf ? "psmf" : "steady",
     clinicalSupervisionRequired: isPsmf,
-    proteinBasisKg: Number(proteinBasisKg.toFixed(1)),
+    targetSource: isPsmf ? "clinician" : "estimated",
   };
 }
 
@@ -334,18 +336,24 @@ export function generateMealPlan(profile: Profile, targets: Targets, seed = 0): 
   const proteinShares = { Breakfast: .22, Lunch: .31, Dinner: .34, Snack: .13 };
 
   return days.map((day, dayIndex) => {
-    const meals = (Object.keys(byType) as (keyof typeof byType)[]).map((type, typeIndex) => {
+    const mealTypes = Object.keys(byType) as (keyof typeof byType)[];
+    let assignedProtein = 0;
+    const meals = mealTypes.map((type, typeIndex) => {
       const options = byType[type];
       const source = options[(dayIndex + seed + typeIndex) % options.length];
+      const desiredProtein = typeIndex === mealTypes.length - 1
+        ? targets.protein - assignedProtein
+        : Math.round(targets.protein * proteinShares[type]);
+      assignedProtein += desiredProtein;
       return adaptMeal(
         source,
         profile,
         targets.method === "psmf"
-          ? Math.round(source.calories * (targets.protein * proteinShares[type] / source.protein) / 5) * 5
+          ? Math.round(source.calories * (desiredProtein / source.protein) / 5) * 5
           : Math.round(targets.calories * calorieShares[type] / 5) * 5,
-        Math.round(targets.protein * proteinShares[type]),
+        desiredProtein,
         `${day.toLowerCase()}-${type.toLowerCase()}-${seed}`,
-        targets.method === "psmf" ? targets.protein * proteinShares[type] / source.protein : undefined,
+        targets.method === "psmf" ? desiredProtein / source.protein : undefined,
       );
     });
     return { day, date: 17 + dayIndex, meals };
@@ -388,23 +396,55 @@ export function validatePlan(profile: Profile, targets: Targets, plan: PlanDay[]
   const has = (pattern: RegExp) => ingredients.some((ingredient) => pattern.test(ingredient));
   const issues: string[] = [];
 
+  if (plan.length !== 7 || plan.some((day) => day.meals.length !== 4)) {
+    issues.push("The proposed week must contain seven days with breakfast, lunch, dinner, and one snack each day.");
+  }
+
+  const allergyPatterns: Record<string, RegExp> = {
+    Nuts: /almond|cashew|hazelnut|pecan|pistachio|walnut|peanut|\bnut\b/,
+    Dairy: /milk|cheese|(?<!plant )yogurt|(?<!dairy-free )feta|cottage cheese|whey|casein/,
+    Gluten: /wheat|barley|rye|orzo|whole-grain (wrap|bread)|rolled oats/,
+    Eggs: /\begg/,
+    Soy: /soy|tofu|miso|tempeh|edamame/,
+    Shellfish: /shrimp|prawn|crab|lobster|clam|mussel|oyster|scallop|shellfish/,
+  };
+  for (const allergy of profile.allergies) {
+    const pattern = allergyPatterns[allergy];
+    if (pattern && has(pattern)) issues.push(`This plan still contains a possible ${allergy.toLowerCase()} allergen.`);
+  }
+  const customAllergy = profile.customAllergy.trim().toLowerCase();
+  if (customAllergy && ingredients.some((ingredient) => ingredient.includes(customAllergy))) {
+    issues.push(`This plan still contains the custom exclusion “${profile.customAllergy.trim()}.”`);
+  }
+
   if (profile.diet === "Pescatarian" && has(/chicken|turkey|beef|pork|lamb/)) {
     issues.push("This plan contains meat, which does not match the pescatarian preference.");
   }
   if (profile.diet === "Vegetarian" && has(/chicken|turkey|beef|pork|lamb|tuna|cod|salmon|fish|shellfish/)) {
     issues.push("This plan contains meat or seafood, which does not match the vegetarian preference.");
   }
-  if (profile.diet === "Vegan" && has(/chicken|turkey|beef|pork|lamb|tuna|cod|salmon|fish|shellfish|egg|yogurt|cottage cheese|feta|dairy/)) {
+  if (profile.diet === "Vegan" && has(/chicken|turkey|beef|pork|lamb|tuna|cod|salmon|fish|shellfish|egg|(?<!plant )yogurt|cottage cheese|(?<!dairy-free )feta|dairy milk/)) {
     issues.push("This plan contains animal-derived foods, which do not match the vegan preference.");
   }
 
   if (targets.method === "psmf") {
+    if (!profile.psmfClinicianApproved || profile.psmfCalories <= 0 || profile.psmfProtein <= 0) {
+      issues.push("Clinician confirmation plus prescribed calorie and protein targets are required for a PSMF plan.");
+    }
     if (has(/oats|quinoa|rice|orzo|wrap|bread|bean|lentil|chickpea|potato|apple|berries|avocado|tahini|oil|nut|seed|hummus|plant yogurt/)) {
-      issues.push("This PSMF week contains a food outside the verified lean-protein and non-starchy-vegetable template.");
+      issues.push("This PSMF week contains a food outside the planner’s lean-protein and non-starchy-vegetable template.");
     }
     const proteinMealMissing = plan.some((day) => day.meals.some((meal) => !meal.ingredients.some((ingredient) => /egg white|chicken|turkey|tuna|cod|nonfat greek yogurt|low-fat cottage cheese/i.test(ingredient.name))));
     if (proteinMealMissing) {
-      issues.push("A PSMF meal no longer has a verified lean protein source after substitutions or exclusions.");
+      issues.push("A PSMF meal no longer has a supported lean protein source after substitutions or exclusions.");
+    }
+    const overCalorieDays = plan.filter((day) => day.meals.reduce((total, meal) => total + meal.calories, 0) > targets.calories);
+    if (overCalorieDays.length > 0) {
+      issues.push(`${overCalorieDays.map((day) => day.day).join(", ")} exceed the clinician-provided calorie target.`);
+    }
+    const underProteinDays = plan.filter((day) => day.meals.reduce((total, meal) => total + meal.protein, 0) < targets.protein);
+    if (underProteinDays.length > 0) {
+      issues.push(`${underProteinDays.map((day) => day.day).join(", ")} fall below the clinician-provided protein target.`);
     }
   }
 

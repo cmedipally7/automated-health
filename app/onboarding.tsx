@@ -60,6 +60,10 @@ export default function Onboarding({ initialProfile, onComplete }: { initialProf
       setError("A clinician must have reviewed and prescribed this rapid phase before it can be planned.");
       return;
     }
+    if (current === "method" && profile.weightLossMethod === "psmf" && (profile.psmfCalories < 400 || profile.psmfCalories > 2000 || profile.psmfProtein < 40 || profile.psmfProtein > 300)) {
+      setError("Enter the daily calorie and protein targets exactly as prescribed by your clinician.");
+      return;
+    }
     if (current === "diet" && profile.weightLossMethod === "psmf" && profile.diet === "Vegan") {
       setError("A vegan PSMF needs an individually prescribed, nutritionally complete formula. This food-only planner cannot verify one safely; choose the steady plan or work directly with your dietitian.");
       return;
@@ -167,8 +171,11 @@ export default function Onboarding({ initialProfile, onComplete }: { initialProf
             <div className="option-stack">
               <Choice title="Steady calorie deficit" icon="🍀" description="The standard, self-guided plan with a conservative calorie floor." selected={profile.weightLossMethod === "steady"} onClick={() => update("weightLossMethod", "steady")} recommended />
               <Choice title="Clinician-directed PSMF" icon="⚕" description="A short, very-low-calorie protein-sparing modified fast for clinically appropriate adults." selected={profile.weightLossMethod === "psmf"} onClick={() => update("weightLossMethod", "psmf")} />
-              {profile.weightLossMethod === "psmf" && <label className="psmf-confirmation"><input type="checkbox" checked={profile.psmfClinicianApproved} onChange={(event) => update("psmfClinicianApproved", event.target.checked)} /><span>I have an active clinician-supervised PSMF plan, including medication review, lab monitoring, supplementation, and a refeeding plan.</span></label>}
-              <div className="guardrail-note"><span>ⓘ</span><p>PSMF is not a faster self-guided setting. This app uses an 800 kcal ceiling and a protein target based on estimated ideal body weight only after clinician confirmation.</p></div>
+              {profile.weightLossMethod === "psmf" && <>
+                <div className="psmf-targets"><span>Copy from your active care plan</span><label>Daily calories<input type="number" min="400" max="2000" inputMode="numeric" value={profile.psmfCalories || ""} onChange={(event) => update("psmfCalories", Number(event.target.value))} placeholder="e.g. 800" /></label><label>Daily protein (g)<input type="number" min="40" max="300" inputMode="numeric" value={profile.psmfProtein || ""} onChange={(event) => update("psmfProtein", Number(event.target.value))} placeholder="e.g. 105" /></label></div>
+                <label className="psmf-confirmation"><input type="checkbox" checked={profile.psmfClinicianApproved} onChange={(event) => update("psmfClinicianApproved", event.target.checked)} /><span>I have an active clinician-supervised PSMF plan, including medication review, lab monitoring, supplementation, and a refeeding plan.</span></label>
+              </>}
+              <div className="guardrail-note"><span>ⓘ</span><p>PSMF is not a faster self-guided setting. NutriPlan will not calculate this prescription; it only plans around the calorie and protein targets supplied by your care team.</p></div>
             </div>
           )}
 
@@ -213,17 +220,17 @@ export default function Onboarding({ initialProfile, onComplete }: { initialProf
           {current === "summary" && (
             <div className="summary-stack">
               <div className="summary-target">
-                <span className="eyebrow">ESTIMATED DAILY TARGET</span>
+                <span className="eyebrow">{targets.targetSource === "clinician" ? "CLINICIAN-PROVIDED DAILY TARGET" : "ESTIMATED DAILY TARGET"}</span>
                 <strong>{targets.calories.toLocaleString()} <small>kcal</small></strong>
-                <p>{targets.protein}g protein · {targets.fiber}g fiber · {targets.maintenance.toLocaleString()} kcal estimated maintenance</p>
+                <p>{targets.protein}g protein · {targets.method === "psmf" ? "food list and other limits stay clinician-directed" : `${targets.fiber}g fiber`} · {targets.maintenance.toLocaleString()} kcal estimated maintenance</p>
               </div>
               <div className="summary-table">
                 <SummaryRow label="Goal" value={goalLabel(profile.goal)} />
-                {profile.goal === "lose" && <SummaryRow label="Approach" value={targets.method === "psmf" ? "Clinician-directed PSMF · 800 kcal max" : "Steady calorie deficit"} />}
+                {profile.goal === "lose" && <SummaryRow label="Approach" value={targets.method === "psmf" ? `Clinician-directed PSMF · ${targets.calories} kcal · ${targets.protein}g protein` : "Steady calorie deficit"} />}
                 <SummaryRow label="Body" value={`${Math.round(profile.heightCm)} cm · ${profile.weightKg.toFixed(1)} kg`} />
                 <SummaryRow label="Diet" value={profile.diet + (profile.standards.length ? ` · ${profile.standards.join(", ")}` : "")} />
                 <SummaryRow label="Allergies" value={profile.noAllergies ? "None" : [...profile.allergies, profile.customAllergy].filter(Boolean).join(", ")} />
-                <SummaryRow label="Budget" value={profile.budget === "custom" ? `$${profile.customBudget}/week` : `$${profile.budget}/week`} />
+                <SummaryRow label="Budget" value={profile.budget === "custom" ? `$${profile.customBudget}/week` : `${profile.budget}/week`} />
               </div>
               <div className="guardrail-note"><span>✓</span><p>Next, NutriPlan will propose seven days of meals. The grocery list is created only after you approve that plan.</p></div>
             </div>
