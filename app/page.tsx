@@ -8,7 +8,6 @@ import {
   calculateTargets,
   generateMealPlan,
   goalLabel,
-  validatePlan,
   type Meal,
   type PlanDay,
   type Profile,
@@ -51,7 +50,6 @@ export default function Home() {
   }
 
   function approvePlan() {
-    if (!profile || !targets || !validatePlan(profile, targets, plan).valid) return;
     setStage("app");
     setPage("today");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -73,7 +71,7 @@ export default function Home() {
   if (!profile || !targets || plan.length === 0) return null;
 
   if (stage === "review") {
-    return <PlanReview profile={profile} targets={targets} plan={plan} validation={validatePlan(profile, targets, plan)} selectedDay={selectedDay} setSelectedDay={setSelectedDay} onMeal={setSelectedMeal} onEdit={editProfile} onRegenerate={regeneratePlan} onApprove={approvePlan} selectedMeal={selectedMeal} closeMeal={() => setSelectedMeal(null)} />;
+    return <PlanReview profile={profile} targets={targets} plan={plan} selectedDay={selectedDay} setSelectedDay={setSelectedDay} onMeal={setSelectedMeal} onEdit={editProfile} onRegenerate={regeneratePlan} onApprove={approvePlan} selectedMeal={selectedMeal} closeMeal={() => setSelectedMeal(null)} />;
   }
 
   const today = plan[0];
@@ -165,7 +163,7 @@ export default function Home() {
   );
 }
 
-function PlanReview({ profile, targets, plan, validation, selectedDay, setSelectedDay, onMeal, onEdit, onRegenerate, onApprove, selectedMeal, closeMeal }: { profile: Profile; targets: Targets; plan: PlanDay[]; validation: ReturnType<typeof validatePlan>; selectedDay: string; setSelectedDay: (day: string) => void; onMeal: (meal: Meal) => void; onEdit: () => void; onRegenerate: () => void; onApprove: () => void; selectedMeal: Meal | null; closeMeal: () => void }) {
+function PlanReview({ profile, targets, plan, selectedDay, setSelectedDay, onMeal, onEdit, onRegenerate, onApprove, selectedMeal, closeMeal }: { profile: Profile; targets: Targets; plan: PlanDay[]; selectedDay: string; setSelectedDay: (day: string) => void; onMeal: (meal: Meal) => void; onEdit: () => void; onRegenerate: () => void; onApprove: () => void; selectedMeal: Meal | null; closeMeal: () => void }) {
   const weeklyAverage = Math.round(plan.reduce((total, item) => total + sum(item.meals, "calories"), 0) / plan.length);
   const averageProtein = Math.round(plan.reduce((total, item) => total + sum(item.meals, "protein"), 0) / plan.length);
   const matchingDays = plan.filter((item) => Math.abs(sum(item.meals, "calories") - targets.calories) <= Math.max(100, targets.calories * .05)).length;
@@ -198,11 +196,9 @@ function PlanReview({ profile, targets, plan, validation, selectedDay, setSelect
 
         <PlanWorkspace plan={plan} targets={targets} selectedDay={selectedDay} onSelectDay={setSelectedDay} onOpenMeal={onMeal} />
 
-        {!validation.valid && <section className="plan-audit" role="alert"><strong>Plan needs correction before grocery approval</strong><ul>{validation.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul><button className="outline-btn" onClick={onEdit}>Edit profile and constraints</button></section>}
-
         <section className="approval-card">
           <div className="approval-copy"><span className="approval-check">✓</span><div><span className="eyebrow">NEXT STEP</span><h2>Ready to turn this into groceries?</h2><p>Approving locks this version and creates one consolidated grocery list. Nothing is ordered yet.</p></div></div>
-          <div className="approval-actions"><button className="outline-btn" onClick={onRegenerate}>Generate a different week</button><button className="approve-btn" onClick={onApprove} disabled={!validation.valid}>Approve week & create groceries →</button></div>
+          <div className="approval-actions"><button className="outline-btn" onClick={onRegenerate}>Generate a different week</button><button className="approve-btn" onClick={onApprove}>Approve week & create groceries →</button></div>
         </section>
       </section>
 
