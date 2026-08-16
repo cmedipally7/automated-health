@@ -234,6 +234,10 @@ h2,h3,p { margin-top:0; }
 .guardrail-note { display:flex; gap:10px; align-items:flex-start; padding:13px 15px; border-radius:13px; color:#667269; background:#dfeee0; }
 .guardrail-note span { color:var(--green); font-weight:800; }
 .guardrail-note p { margin:0; font-size:10px; line-height:1.5; }
+.psmf-confirmation { display:flex; align-items:flex-start; gap:10px; padding:14px 15px; border:1px solid #bdd5c0; border-radius:14px; color:#4a5c4c; background:#f5faf3; font-size:11px; line-height:1.45; }
+.psmf-confirmation input { width:16px; height:16px; margin:0; accent-color:var(--green); flex:0 0 auto; }
+.clinical-notice { display:grid; gap:5px; margin-bottom:24px; padding:15px 18px; border:1px solid #d7c185; border-radius:14px; color:#59491d; background:#fff8e3; font-size:11px; line-height:1.5; }
+.clinical-notice strong { color:#59491d; font-size:12px; }
 .allergy-area { display:grid; gap:11px; }
 .check-grid { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
 .check-choice { display:grid; grid-template-columns:auto auto 1fr; align-items:center; gap:9px; min-height:51px; padding:10px 12px; border:1.5px solid #d5e5d6; border-radius:14px; color:var(--forest); background:white; text-align:left; }
@@ -349,8 +353,13 @@ h2,h3,p { margin-top:0; }
 .approval-card h2 { margin:5px 0 3px; font-family:inherit; font-size:18px; letter-spacing:-.02em; }
 .approval-card p { max-width:560px; margin:0; color:#b8cbbb; font-size:10px; line-height:1.5; }
 .approval-actions { display:flex; gap:9px; flex:0 0 auto; }
+.plan-audit { margin-top:22px; padding:18px 20px; border:1px solid #dbb391; border-radius:16px; color:#743d23; background:#fff4ec; font-size:11px; line-height:1.5; }
+.plan-audit strong { display:block; color:#743d23; font-size:13px; }
+.plan-audit ul { margin:8px 0 13px; padding-left:18px; }
+.plan-audit .outline-btn { padding:9px 12px; border-color:#c79070; color:#743d23; }
 .approval-card .outline-btn { color:white; border-color:#66836c; }
 .approve-btn { min-height:43px; padding:11px 15px; border:0; border-radius:11px; color:var(--forest); background:#d9edd9; font-size:10px; font-weight:800; }
+.approve-btn:disabled { cursor:not-allowed; color:#7c897d; background:#bfcbbf; }
 .empty-progress { min-height:340px; }
 .baseline-line { position:relative; display:flex; align-items:center; justify-content:center; height:170px; border-bottom:1px solid #d4ddd4; color:#869088; font-size:10px; text-align:center; background:repeating-linear-gradient(to bottom,#f0f4ef 0,#f0f4ef 1px,transparent 1px,transparent 43px); }
 .baseline-line i { position:absolute; left:8%; right:8%; bottom:48px; height:3px; border-radius:99px; background:linear-gradient(90deg,#a7caaa,#4f8a57); }

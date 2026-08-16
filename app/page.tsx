@@ -8,6 +8,7 @@ import {
   calculateTargets,
   generateMealPlan,
   goalLabel,
+  validatePlan,
   type Meal,
   type PlanDay,
   type Profile,
@@ -50,6 +51,7 @@ export default function Home() {
   }
 
   function approvePlan() {
+    if (!profile || !targets || !validatePlan(profile, targets, plan).valid) return;
     setStage("app");
     setPage("today");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -71,7 +73,7 @@ export default function Home() {
   if (!profile || !targets || plan.length === 0) return null;
 
   if (stage === "review") {
-    return <PlanReview profile={profile} targets={targets} plan={plan} selectedDay={selectedDay} setSelectedDay={setSelectedDay} onMeal={setSelectedMeal} onEdit={editProfile} onRegenerate={regeneratePlan} onApprove={approvePlan} selectedMeal={selectedMeal} closeMeal={() => setSelectedMeal(null)} />;
+    return <PlanReview profile={profile} targets={targets} plan={plan} validation={validatePlan(profile, targets, plan)} selectedDay={selectedDay} setSelectedDay={setSelectedDay} onMeal={setSelectedMeal} onEdit={editProfile} onRegenerate={regeneratePlan} onApprove={approvePlan} selectedMeal={selectedMeal} closeMeal={() => setSelectedMeal(null)} />;
   }
 
   const today = plan[0];
@@ -102,6 +104,7 @@ export default function Home() {
       <section className="content">
         {page === "today" && (
           <>
+            {targets.clinicalSupervisionRequired && <ClinicalNotice />}
             <header className="topbar"><div><span className="eyebrow">PLAN APPROVED</span><h1>Your week is ready, {profile.name}.</h1><p className="lede">Every meal below comes from the plan you approved. Its ingredients now power the grocery list.</p></div><button className="outline-btn" onClick={() => setPage("plan")}>Review plan</button></header>
             <section className="hero-grid">
               <article className="target-card">
@@ -126,6 +129,7 @@ export default function Home() {
 
         {page === "plan" && (
           <section className="page-view">
+            {targets.clinicalSupervisionRequired && <ClinicalNotice />}
             <header className="topbar compact-topbar"><div><span className="eyebrow">APPROVED · WEEK OF AUGUST 17</span><h1>Your meal plan</h1><p className="lede">See the whole week, then choose a day for recipe details.</p></div><button className="outline-btn" onClick={editProfile}>Edit profile</button></header>
             <PlanWorkspace plan={plan} targets={targets} selectedDay={selectedDay} onSelectDay={setSelectedDay} onOpenMeal={setSelectedMeal} />
             <div className="plan-note"><span>♻</span><div><strong>Plan-to-cart traceability</strong><p>Each ingredient is stored with its meal, serving quantity, unit, and aisle category. The grocery list is the exact aggregate of this approved week.</p></div></div>
@@ -163,10 +167,12 @@ export default function Home() {
   );
 }
 
-function PlanReview({ profile, targets, plan, selectedDay, setSelectedDay, onMeal, onEdit, onRegenerate, onApprove, selectedMeal, closeMeal }: { profile: Profile; targets: Targets; plan: PlanDay[]; selectedDay: string; setSelectedDay: (day: string) => void; onMeal: (meal: Meal) => void; onEdit: () => void; onRegenerate: () => void; onApprove: () => void; selectedMeal: Meal | null; closeMeal: () => void }) {
+function PlanReview({ profile, targets, plan, validation, selectedDay, setSelectedDay, onMeal, onEdit, onRegenerate, onApprove, selectedMeal, closeMeal }: { profile: Profile; targets: Targets; plan: PlanDay[]; validation: ReturnType<typeof validatePlan>; selectedDay: string; setSelectedDay: (day: string) => void; onMeal: (meal: Meal) => void; onEdit: () => void; onRegenerate: () => void; onApprove: () => void; selectedMeal: Meal | null; closeMeal: () => void }) {
   const weeklyAverage = Math.round(plan.reduce((total, item) => total + sum(item.meals, "calories"), 0) / plan.length);
   const averageProtein = Math.round(plan.reduce((total, item) => total + sum(item.meals, "protein"), 0) / plan.length);
-  const matchingDays = plan.filter((item) => Math.abs(sum(item.meals, "calories") - targets.calories) <= Math.max(100, targets.calories * .05)).length;
+  const matchingDays = plan.filter((item) => targets.method === "psmf"
+    ? sum(item.meals, "calories") <= targets.calories && sum(item.meals, "protein") >= targets.protein
+    : Math.abs(sum(item.meals, "calories") - targets.calories) <= Math.max(100, targets.calories * .05)).length;
 
   return (
     <main className="review-screen">
@@ -177,6 +183,7 @@ function PlanReview({ profile, targets, plan, selectedDay, setSelectedDay, onMea
       </header>
 
       <section className="review-content">
+        {targets.clinicalSupervisionRequired && <ClinicalNotice />}
         <div className="review-intro">
           <div className="review-heading">
             <span className="eyebrow">YOUR PROPOSED WEEK</span>
@@ -189,22 +196,28 @@ function PlanReview({ profile, targets, plan, selectedDay, setSelectedDay, onMea
             </div>
           </div>
           <aside className="plan-fit" aria-label="Weekly nutrition fit">
-            <div className="fit-heading"><span>✓</span><div><strong>Plan fits your targets</strong><small>{matchingDays} of 7 days are within range</small></div></div>
+            <div className="fit-heading"><span>✓</span><div><strong>{targets.method === "psmf" ? "Plan stays within the clinical ceiling" : "Plan fits your targets"}</strong><small>{matchingDays} of 7 days are within range</small></div></div>
             <div className="fit-stats"><span><b>{weeklyAverage.toLocaleString()}</b><small>avg. kcal</small></span><span><b>{averageProtein}g</b><small>avg. protein</small></span><span><b>28</b><small>meals</small></span></div>
           </aside>
         </div>
 
         <PlanWorkspace plan={plan} targets={targets} selectedDay={selectedDay} onSelectDay={setSelectedDay} onOpenMeal={onMeal} />
 
+        {!validation.valid && <section className="plan-audit" role="alert"><strong>Plan needs correction before grocery approval</strong><ul>{validation.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul><button className="outline-btn" onClick={onEdit}>Edit profile and constraints</button></section>}
+
         <section className="approval-card">
           <div className="approval-copy"><span className="approval-check">✓</span><div><span className="eyebrow">NEXT STEP</span><h2>Ready to turn this into groceries?</h2><p>Approving locks this version and creates one consolidated grocery list. Nothing is ordered yet.</p></div></div>
-          <div className="approval-actions"><button className="outline-btn" onClick={onRegenerate}>Generate a different week</button><button className="approve-btn" onClick={onApprove}>Approve week & create groceries →</button></div>
+          <div className="approval-actions"><button className="outline-btn" onClick={onRegenerate}>Generate a different week</button><button className="approve-btn" onClick={onApprove} disabled={!validation.valid}>Approve week & create groceries →</button></div>
         </section>
       </section>
 
       {selectedMeal && <MealModal meal={selectedMeal} saved={false} onSave={() => {}} onClose={closeMeal} reviewMode />}
     </main>
   );
+}
+
+function ClinicalNotice() {
+  return <aside className="clinical-notice" role="note"><strong>Clinician-directed PSMF</strong><span>800 kcal maximum · {"≤20g"} carbs · {"≤20g"} fat · protein set from estimated ideal body weight. Follow the prescribing team’s individualized food list, supplements, labs, medication changes, and refeeding schedule if they differ from this planner.</span></aside>;
 }
 
 function PlanWorkspace({ plan, targets, selectedDay, onSelectDay, onOpenMeal }: { plan: PlanDay[]; targets: Targets; selectedDay: string; onSelectDay: (day: string) => void; onOpenMeal: (meal: Meal) => void }) {
@@ -253,7 +266,7 @@ function DayPlan({ day, targets, onOpenMeal }: { day: PlanDay; targets: Targets;
       </header>
 
       <div className="day-targets">
-        <NutritionTarget label="Calories" value={`${calories.toLocaleString()} kcal`} detail={`${Math.abs(calorieDifference)} ${calorieDifference >= 0 ? "over" : "under"} target`} progress={calories / targets.calories} />
+        <NutritionTarget label="Calories" value={`${calories.toLocaleString()} kcal`} detail={targets.method === "psmf" ? `${targets.calories} kcal clinical ceiling` : `${Math.abs(calorieDifference)} ${calorieDifference >= 0 ? "over" : "under"} target`} progress={calories / targets.calories} />
         <NutritionTarget label="Protein" value={`${protein}g`} detail={`${targets.protein}g target`} progress={protein / targets.protein} />
       </div>
 

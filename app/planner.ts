@@ -2,10 +2,13 @@ export type Goal = "lose" | "gain" | "maintain";
 export type Sex = "female" | "male";
 export type Activity = "sedentary" | "3x" | "5x";
 export type Diet = "Balanced" | "Pescatarian" | "Vegetarian" | "Vegan";
+export type WeightLossMethod = "steady" | "psmf";
 
 export type Profile = {
   name: string;
   goal: Goal;
+  weightLossMethod: WeightLossMethod;
+  psmfClinicianApproved: boolean;
   age: number;
   sex: Sex;
   heightCm: number;
@@ -30,6 +33,9 @@ export type Targets = {
   fiber: number;
   dailyAdjustment: number;
   projectedKg: number;
+  method: WeightLossMethod;
+  clinicalSupervisionRequired: boolean;
+  proteinBasisKg: number;
 };
 
 export type Ingredient = {
@@ -55,10 +61,13 @@ export type Meal = {
 
 export type PlanDay = { day: string; date: number; meals: Meal[] };
 export type GroceryGroup = { group: string; items: { name: string; quantity: string }[] };
+export type PlanValidation = { valid: boolean; issues: string[] };
 
 export const defaultProfile: Profile = {
   name: "",
   goal: "lose",
+  weightLossMethod: "steady",
+  psmfClinicianApproved: false,
   age: 35,
   sex: "male",
   heightCm: 175,
@@ -84,15 +93,24 @@ export function calculateTargets(profile: Profile): Targets {
   const sexAdjustment = profile.sex === "female" ? -161 : 5;
   const bmr = 10 * profile.weightKg + 6.25 * profile.heightCm - 5 * profile.age + sexAdjustment;
   const maintenance = Math.round(bmr * activityMultipliers[profile.activity]);
+  const isPsmf = profile.goal === "lose" && profile.weightLossMethod === "psmf" && profile.psmfClinicianApproved;
   const requestedDeficit = (profile.paceKg * 7700) / 7;
   const safeDeficit = Math.min(requestedDeficit, maintenance * 0.2, 750);
   const floor = profile.sex === "female" ? 1200 : 1500;
-  const dailyAdjustment = profile.goal === "lose" ? -safeDeficit : profile.goal === "gain" ? 300 : 0;
-  const calories = Math.max(floor, Math.round((maintenance + dailyAdjustment) / 25) * 25);
-  const proteinPerKg = profile.goal === "maintain" ? 1.4 : 1.7;
-  const protein = Math.round(profile.weightKg * proteinPerKg);
-  const fat = Math.round((calories * 0.28) / 9);
-  const carbs = Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
+  // PSMF protein is calculated from estimated ideal body weight, not current body weight.
+  // This remains a clinician-supervised VLCD pathway; see the onboarding gate.
+  const idealWeightKg = profile.sex === "male"
+    ? 50 + 2.3 * Math.max(0, profile.heightCm / 2.54 - 60)
+    : 45.5 + 2.3 * Math.max(0, profile.heightCm / 2.54 - 60);
+  const proteinBasisKg = isPsmf ? idealWeightKg : profile.weightKg;
+  const proteinPerKg = isPsmf ? 1.5 : profile.goal === "maintain" ? 1.4 : 1.7;
+  const protein = Math.round(proteinBasisKg * proteinPerKg);
+  const calories = isPsmf
+    ? 800
+    : Math.max(floor, Math.round((maintenance + (profile.goal === "lose" ? -safeDeficit : profile.goal === "gain" ? 300 : 0)) / 25) * 25);
+  const fat = isPsmf ? 20 : Math.round((calories * 0.28) / 9);
+  const carbs = isPsmf ? 20 : Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
+  const dailyAdjustment = isPsmf ? calories - maintenance : profile.goal === "lose" ? -safeDeficit : profile.goal === "gain" ? 300 : 0;
 
   return {
     calories,
@@ -100,9 +118,12 @@ export function calculateTargets(profile: Profile): Targets {
     protein,
     carbs,
     fat,
-    fiber: Math.max(25, Math.round((calories / 1000) * 14)),
+    fiber: isPsmf ? 20 : Math.max(25, Math.round((calories / 1000) * 14)),
     dailyAdjustment: Math.round(dailyAdjustment),
-    projectedKg: profile.goal === "lose" ? Number(((safeDeficit * 7) / 7700).toFixed(2)) : 0,
+    projectedKg: profile.goal === "lose" ? Number((((isPsmf ? maintenance - calories : safeDeficit) * 7) / 7700).toFixed(2)) : 0,
+    method: isPsmf ? "psmf" : "steady",
+    clinicalSupervisionRequired: isPsmf,
+    proteinBasisKg: Number(proteinBasisKg.toFixed(1)),
   };
 }
 
@@ -183,8 +204,7 @@ const substitutions: Record<string, { pattern: RegExp; replacement: string }[]> 
   Shellfish: [],
 };
 
-function adaptMeal(seed: MealSeed, profile: Profile, desiredCalories: number, desiredProtein: number, id: string): Meal {
-  const factor = desiredCalories / seed.calories;
+function adaptMeal(seed: MealSeed, profile: Profile, desiredCalories: number, desiredProtein: number, id: string, ingredientFactor = desiredCalories / seed.calories): Meal {
   let name = seed.name;
   let description = seed.description;
   let ingredients = seed.ingredients.map((ingredient) => ({ ...ingredient }));
@@ -223,16 +243,41 @@ function adaptMeal(seed: MealSeed, profile: Profile, desiredCalories: number, de
     protein: desiredProtein,
     ingredients: ingredients.map((ingredient) => ({
       ...ingredient,
-      quantity: Number((ingredient.quantity * factor).toFixed(2)),
+      quantity: Number((ingredient.quantity * ingredientFactor).toFixed(2)),
     })),
   };
 }
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+function psmfMealPool(diet: Diet): MealSeed[] {
+  const pescatarian = diet === "Pescatarian";
+  const vegetarian = diet === "Vegetarian";
+  const lunchProtein = pescatarian ? "Water-packed tuna" : vegetarian ? "Egg whites" : "Chicken breast";
+  const lunchName = pescatarian ? "Tuna & cucumber plate" : vegetarian ? "Egg white & cucumber plate" : "Chicken & cucumber plate";
+  const dinnerProtein = pescatarian ? "Cod fillets" : vegetarian ? "Nonfat Greek yogurt" : "Turkey breast";
+  const dinnerName = pescatarian ? "Cod with lemon greens" : vegetarian ? "Greek yogurt herb bowl" : "Turkey with lemon greens";
+  const lunchQuantity = vegetarian ? 1.5 : 5;
+  const lunchUnit = vegetarian ? "cup" : "oz";
+  const dinnerQuantity = vegetarian ? 1.5 : 6;
+  const dinnerUnit = vegetarian ? "cup" : "oz";
+  return [
+    { type: "Breakfast", time: "8:00 AM", name: "Egg white & spinach scramble", calories: 190, protein: 30, prep: "10 min", icon: "🍳", tone: "grain", description: "Egg whites, spinach, herbs, and a small portion of low-fat cottage cheese.", ingredients: [i("Egg whites", 1, "cup", "Protein & dairy"), i("Baby spinach", 1, "cup", "Produce"), i("Low-fat cottage cheese", .25, "cup", "Protein & dairy")] },
+    { type: "Breakfast", time: "8:00 AM", name: "Plain Greek yogurt protein bowl", calories: 150, protein: 25, prep: "3 min", icon: "🥣", tone: "berry", description: "Nonfat Greek yogurt with cinnamon, vanilla, and no fruit or granola.", ingredients: [i("Nonfat Greek yogurt", 1, "cup", "Protein & dairy")] },
+    { type: "Lunch", time: "12:30 PM", name: lunchName, calories: 245, protein: 39, prep: "10 min", icon: "🥗", tone: "grain", description: `Lean ${lunchProtein.toLowerCase()} over crunchy cucumber, lettuce, herbs, and lemon.`, ingredients: [i(lunchProtein, lunchQuantity, lunchUnit, "Protein & dairy"), i("Mixed greens", 2, "cup", "Produce"), i("Cucumber", .5, "each", "Produce"), i("Lemons", .5, "each", "Produce")] },
+    { type: "Lunch", time: "12:30 PM", name: "Egg white lettuce wraps", calories: 230, protein: 36, prep: "12 min", icon: "🥬", tone: "salmon", description: "Seasoned egg whites and low-fat cottage cheese in crisp lettuce cups.", ingredients: [i("Egg whites", 1.25, "cup", "Protein & dairy"), i("Low-fat cottage cheese", .25, "cup", "Protein & dairy"), i("Romaine lettuce", 4, "leaves", "Produce")] },
+    { type: "Dinner", time: "6:30 PM", name: dinnerName, calories: 275, protein: 43, prep: "22 min", icon: "🍋", tone: "salmon", description: vegetarian ? "Nonfat Greek yogurt with herbs, cucumber, broccoli, and lemon." : `Lean baked ${dinnerProtein.toLowerCase()} with broccoli, lemon, and herbs.`, ingredients: [i(dinnerProtein, dinnerQuantity, dinnerUnit, "Protein & dairy"), i("Broccoli", 1.5, "cup", "Produce"), i("Lemons", .5, "each", "Produce")] },
+    { type: "Dinner", time: "6:30 PM", name: vegetarian ? "Egg white & asparagus bowl" : "White fish & asparagus", calories: 260, protein: 41, prep: "20 min", icon: "🐟", tone: "berry", description: vegetarian ? "Egg whites with asparagus, fresh herbs, and lemon." : "Baked white fish with asparagus, fresh herbs, and lemon.", ingredients: [i(vegetarian ? "Egg whites" : "Cod fillets", vegetarian ? 1.75 : 6, vegetarian ? "cup" : "oz", "Protein & dairy"), i("Asparagus", 1.5, "cup", "Produce"), i("Lemons", .5, "each", "Produce")] },
+    { type: "Snack", time: "3:30 PM", name: "Cottage cheese & cucumber", calories: 125, protein: 20, prep: "4 min", icon: "🥒", tone: "grain", description: "Low-fat cottage cheese with cucumber, pepper, and dill.", ingredients: [i("Low-fat cottage cheese", .75, "cup", "Protein & dairy"), i("Cucumber", .5, "each", "Produce")] },
+    { type: "Snack", time: "3:30 PM", name: vegetarian ? "Egg white lettuce cups" : "Turkey or tuna roll-ups", calories: 135, protein: 22, prep: "5 min", icon: "🥬", tone: "berry", description: "A lean protein snack wrapped in crisp lettuce leaves.", ingredients: [i(vegetarian ? "Egg whites" : pescatarian ? "Water-packed tuna" : "Turkey breast", vegetarian ? .75 : 3, vegetarian ? "cup" : "oz", "Protein & dairy"), i("Romaine lettuce", 3, "leaves", "Produce")] },
+  ];
+}
+
 export function generateMealPlan(profile: Profile, targets: Targets, seed = 0): PlanDay[] {
   const lowBudget = profile.budget === "$15–20";
-  const startingPool = profile.diet === "Pescatarian" && lowBudget
+  const startingPool = targets.method === "psmf"
+    ? psmfMealPool(profile.diet)
+    : profile.diet === "Pescatarian" && lowBudget
     ? [...pools.Pescatarian, ...pools.Vegetarian.filter((meal) => meal.type === "Dinner")]
     : pools[profile.diet];
   const affordablePool = lowBudget
@@ -255,9 +300,12 @@ export function generateMealPlan(profile: Profile, targets: Targets, seed = 0): 
       return adaptMeal(
         source,
         profile,
-        Math.round(targets.calories * calorieShares[type] / 5) * 5,
+        targets.method === "psmf"
+          ? Math.round(source.calories * (targets.protein * proteinShares[type] / source.protein) / 5) * 5
+          : Math.round(targets.calories * calorieShares[type] / 5) * 5,
         Math.round(targets.protein * proteinShares[type]),
         `${day.toLowerCase()}-${type.toLowerCase()}-${seed}`,
+        targets.method === "psmf" ? targets.protein * proteinShares[type] / source.protein : undefined,
       );
     });
     return { day, date: 17 + dayIndex, meals };
@@ -289,6 +337,34 @@ export function buildGroceryList(plan: PlanDay[]): GroceryGroup[] {
         quantity: formatQuantity(item.quantity, item.unit),
       })),
   })).filter((group) => group.items.length > 0);
+}
+
+export function validatePlan(profile: Profile, targets: Targets, plan: PlanDay[]): PlanValidation {
+  const ingredients = plan.flatMap((day) => day.meals.flatMap((meal) => meal.ingredients.map((ingredient) => ingredient.name.toLowerCase())));
+  const has = (pattern: RegExp) => ingredients.some((ingredient) => pattern.test(ingredient));
+  const issues: string[] = [];
+
+  if (profile.diet === "Pescatarian" && has(/chicken|turkey|beef|pork|lamb/)) {
+    issues.push("This plan contains meat, which does not match the pescatarian preference.");
+  }
+  if (profile.diet === "Vegetarian" && has(/chicken|turkey|beef|pork|lamb|tuna|cod|salmon|fish|shellfish/)) {
+    issues.push("This plan contains meat or seafood, which does not match the vegetarian preference.");
+  }
+  if (profile.diet === "Vegan" && has(/chicken|turkey|beef|pork|lamb|tuna|cod|salmon|fish|shellfish|egg|yogurt|cottage cheese|feta|dairy/)) {
+    issues.push("This plan contains animal-derived foods, which do not match the vegan preference.");
+  }
+
+  if (targets.method === "psmf") {
+    if (has(/oats|quinoa|rice|orzo|wrap|bread|bean|lentil|chickpea|potato|apple|berries|avocado|tahini|oil|nut|seed|hummus|plant yogurt/)) {
+      issues.push("This PSMF week contains a food outside the verified lean-protein and non-starchy-vegetable template.");
+    }
+    const proteinMealMissing = plan.some((day) => day.meals.some((meal) => !meal.ingredients.some((ingredient) => /egg white|chicken|turkey|tuna|cod|nonfat greek yogurt|low-fat cottage cheese/i.test(ingredient.name))));
+    if (proteinMealMissing) {
+      issues.push("A PSMF meal no longer has a verified lean protein source after substitutions or exclusions.");
+    }
+  }
+
+  return { valid: issues.length === 0, issues: [...new Set(issues)] };
 }
 
 function formatQuantity(quantity: number, unit: string) {

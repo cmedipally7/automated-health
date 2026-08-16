@@ -27,7 +27,7 @@ const dietOptions: { label: Diet; emoji: string; description: string }[] = [
   { label: "Vegan", emoji: "🌱", description: "Plant-based only" },
 ];
 
-type StepId = "goal" | "about" | "height" | "weight" | "pace" | "activity" | "allergies" | "diet" | "budget" | "summary";
+type StepId = "goal" | "about" | "height" | "weight" | "pace" | "method" | "activity" | "allergies" | "diet" | "budget" | "summary";
 
 export default function Onboarding({ initialProfile, onComplete }: { initialProfile?: Profile; onComplete: (profile: Profile) => void }) {
   const [profile, setProfile] = useState<Profile>(initialProfile ?? defaultProfile);
@@ -37,7 +37,7 @@ export default function Onboarding({ initialProfile, onComplete }: { initialProf
   const [error, setError] = useState("");
 
   const steps: StepId[] = profile.goal === "lose"
-    ? ["goal", "about", "height", "weight", "pace", "activity", "allergies", "diet", "budget", "summary"]
+    ? ["goal", "about", "height", "weight", "pace", "method", "activity", "allergies", "diet", "budget", "summary"]
     : ["goal", "about", "height", "weight", "activity", "allergies", "diet", "budget", "summary"];
   const current = steps[stepIndex] ?? "summary";
   const targets = useMemo(() => calculateTargets(profile), [profile]);
@@ -54,6 +54,14 @@ export default function Onboarding({ initialProfile, onComplete }: { initialProf
     }
     if (current === "allergies" && !profile.noAllergies && profile.allergies.length === 0 && !profile.customAllergy.trim()) {
       setError("Select an allergy or choose “No allergies.”");
+      return;
+    }
+    if (current === "method" && profile.weightLossMethod === "psmf" && !profile.psmfClinicianApproved) {
+      setError("A clinician must have reviewed and prescribed this rapid phase before it can be planned.");
+      return;
+    }
+    if (current === "diet" && profile.weightLossMethod === "psmf" && profile.diet === "Vegan") {
+      setError("A vegan PSMF needs an individually prescribed, nutritionally complete formula. This food-only planner cannot verify one safely; choose the steady plan or work directly with your dietitian.");
       return;
     }
     if (current === "summary") {
@@ -155,6 +163,15 @@ export default function Onboarding({ initialProfile, onComplete }: { initialProf
             </div>
           )}
 
+          {current === "method" && (
+            <div className="option-stack">
+              <Choice title="Steady calorie deficit" icon="🍀" description="The standard, self-guided plan with a conservative calorie floor." selected={profile.weightLossMethod === "steady"} onClick={() => update("weightLossMethod", "steady")} recommended />
+              <Choice title="Clinician-directed PSMF" icon="⚕" description="A short, very-low-calorie protein-sparing modified fast for clinically appropriate adults." selected={profile.weightLossMethod === "psmf"} onClick={() => update("weightLossMethod", "psmf")} />
+              {profile.weightLossMethod === "psmf" && <label className="psmf-confirmation"><input type="checkbox" checked={profile.psmfClinicianApproved} onChange={(event) => update("psmfClinicianApproved", event.target.checked)} /><span>I have an active clinician-supervised PSMF plan, including medication review, lab monitoring, supplementation, and a refeeding plan.</span></label>}
+              <div className="guardrail-note"><span>ⓘ</span><p>PSMF is not a faster self-guided setting. This app uses an 800 kcal ceiling and a protein target based on estimated ideal body weight only after clinician confirmation.</p></div>
+            </div>
+          )}
+
           {current === "activity" && (
             <div className="option-stack">
               <Choice title="Mostly sedentary" icon="🪑" description="Desk-based day with minimal intentional exercise" selected={profile.activity === "sedentary"} onClick={() => update("activity", "sedentary" as Activity)} />
@@ -202,6 +219,7 @@ export default function Onboarding({ initialProfile, onComplete }: { initialProf
               </div>
               <div className="summary-table">
                 <SummaryRow label="Goal" value={goalLabel(profile.goal)} />
+                {profile.goal === "lose" && <SummaryRow label="Approach" value={targets.method === "psmf" ? "Clinician-directed PSMF · 800 kcal max" : "Steady calorie deficit"} />}
                 <SummaryRow label="Body" value={`${Math.round(profile.heightCm)} cm · ${profile.weightKg.toFixed(1)} kg`} />
                 <SummaryRow label="Diet" value={profile.diet + (profile.standards.length ? ` · ${profile.standards.join(", ")}` : "")} />
                 <SummaryRow label="Allergies" value={profile.noAllergies ? "None" : [...profile.allergies, profile.customAllergy].filter(Boolean).join(", ")} />
@@ -246,16 +264,16 @@ function cmToFeet(cm: number) {
 }
 
 function stepEyebrow(step: StepId) {
-  const map: Record<StepId, string> = { goal: "YOUR OUTCOME", about: "ABOUT YOU", height: "BODY DETAILS", weight: "BODY DETAILS", pace: "YOUR PACE", activity: "YOUR ROUTINE", allergies: "FOOD SAFETY", diet: "FOOD PREFERENCES", budget: "SHOPPING", summary: "REVIEW" };
+  const map: Record<StepId, string> = { goal: "YOUR OUTCOME", about: "ABOUT YOU", height: "BODY DETAILS", weight: "BODY DETAILS", pace: "YOUR PACE", method: "SAFETY FIRST", activity: "YOUR ROUTINE", allergies: "FOOD SAFETY", diet: "FOOD PREFERENCES", budget: "SHOPPING", summary: "REVIEW" };
   return map[step];
 }
 
 function stepTitle(step: StepId) {
-  const map: Record<StepId, string> = { goal: "What’s your main goal?", about: "A little about you.", height: "How tall are you?", weight: "What’s your current weight?", pace: "What pace feels realistic?", activity: "How active are you?", allergies: "Any food allergies?", diet: "How do you prefer to eat?", budget: "What should the week cost?", summary: "Your starting targets." };
+  const map: Record<StepId, string> = { goal: "What’s your main goal?", about: "A little about you.", height: "How tall are you?", weight: "What’s your current weight?", pace: "What pace feels realistic?", method: "Which weight-loss approach fits your care?", activity: "How active are you?", allergies: "Any food allergies?", diet: "How do you prefer to eat?", budget: "What should the week cost?", summary: "Your starting targets." };
   return map[step];
 }
 
 function stepSubtitle(step: StepId) {
-  const map: Record<StepId, string> = { goal: "We’ll build your nutrition and meal plan around this.", about: "These details make the target calculation auditable and personal.", height: "Height helps estimate your baseline energy needs.", weight: "Weight informs your calorie and protein targets.", pace: "We’ll respect this preference while applying conservative guardrails.", activity: "More activity generally means more fuel.", allergies: "These are hard exclusions from every proposed meal.", diet: "We’ll use this to select the recipe pool.", budget: "This guides ingredient reuse and protein choices.", summary: "Review the calculation before we propose your meals." };
+  const map: Record<StepId, string> = { goal: "We’ll build your nutrition and meal plan around this.", about: "These details make the target calculation auditable and personal.", height: "Height helps estimate your baseline energy needs.", weight: "Weight informs your calorie and protein targets.", pace: "We’ll respect this preference while applying conservative guardrails.", method: "A PSMF is an intensive clinical protocol, not a general wellness diet.", activity: "More activity generally means more fuel.", allergies: "These are hard exclusions from every proposed meal.", diet: "We’ll use this to select the recipe pool.", budget: "This guides ingredient reuse and protein choices.", summary: "Review the calculation before we propose your meals." };
   return map[step];
 }
