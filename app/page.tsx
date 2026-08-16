@@ -74,7 +74,6 @@ export default function Home() {
     return <PlanReview profile={profile} targets={targets} plan={plan} selectedDay={selectedDay} setSelectedDay={setSelectedDay} onMeal={setSelectedMeal} onEdit={editProfile} onRegenerate={regeneratePlan} onApprove={approvePlan} selectedMeal={selectedMeal} closeMeal={() => setSelectedMeal(null)} />;
   }
 
-  const activeDay = plan.find((day) => day.day === selectedDay) ?? plan[0];
   const today = plan[0];
   const groceries = buildGroceryList(plan);
   const groceryCount = groceries.reduce((total, group) => total + group.items.length, 0);
@@ -126,10 +125,8 @@ export default function Home() {
 
         {page === "plan" && (
           <section className="page-view">
-            <header className="topbar"><div><span className="eyebrow">APPROVED · WEEK OF AUGUST 17</span><h1>Your meal plan</h1><p className="lede">{profile.diet} meals built for {targets.calories.toLocaleString()} calories and {targets.protein}g protein per day.</p></div><button className="outline-btn" onClick={editProfile}>Edit profile</button></header>
-            <DayTabs plan={plan} selectedDay={selectedDay} onSelect={setSelectedDay} />
-            <DaySummary day={activeDay} targets={targets} />
-            <MealsSection title={`Meals for ${activeDay.day}`} eyebrow="APPROVED DAY" meals={activeDay.meals} savedMeals={savedMeals} onSave={saveMeal} onOpen={setSelectedMeal} />
+            <header className="topbar compact-topbar"><div><span className="eyebrow">APPROVED · WEEK OF AUGUST 17</span><h1>Your meal plan</h1><p className="lede">See the whole week, then choose a day for recipe details.</p></div><button className="outline-btn" onClick={editProfile}>Edit profile</button></header>
+            <PlanWorkspace plan={plan} targets={targets} selectedDay={selectedDay} onSelectDay={setSelectedDay} onOpenMeal={setSelectedMeal} />
             <div className="plan-note"><span>♻</span><div><strong>Plan-to-cart traceability</strong><p>Each ingredient is stored with its meal, serving quantity, unit, and aisle category. The grocery list is the exact aggregate of this approved week.</p></div></div>
           </section>
         )}
@@ -159,17 +156,121 @@ export default function Home() {
 }
 
 function PlanReview({ profile, targets, plan, selectedDay, setSelectedDay, onMeal, onEdit, onRegenerate, onApprove, selectedMeal, closeMeal }: { profile: Profile; targets: Targets; plan: PlanDay[]; selectedDay: string; setSelectedDay: (day: string) => void; onMeal: (meal: Meal) => void; onEdit: () => void; onRegenerate: () => void; onApprove: () => void; selectedMeal: Meal | null; closeMeal: () => void }) {
-  const day = plan.find((item) => item.day === selectedDay) ?? plan[0];
   const weeklyAverage = Math.round(plan.reduce((total, item) => total + sum(item.meals, "calories"), 0) / plan.length);
-  return <main className="review-screen"><header className="review-top"><button className="brand" onClick={onEdit}><span className="brand-mark">✳</span> NutriPlan</button><div className="workflow-steps"><span className="done">✓ Profile</span><i /><span className="active">2 Review meals</span><i /><span>3 Groceries</span></div><button className="text-btn" onClick={onEdit}>Edit answers</button></header><section className="review-content"><div className="review-hero"><div><span className="eyebrow">YOUR PROPOSED WEEK</span><h1>Here’s the plan, {profile.name}.</h1><p>Review the meals before anything becomes a grocery list. You can open recipes or ask for another complete option.</p></div><div className="target-summary"><span><b>{targets.calories.toLocaleString()}</b> kcal target</span><span><b>{targets.protein}g</b> protein</span><span><b>{weeklyAverage.toLocaleString()}</b> kcal plan avg.</span></div></div><div className="constraint-chips"><span>{profile.diet}</span>{profile.allergies.map((item) => <span key={item}>No {item}</span>)}{profile.customAllergy && <span>No {profile.customAllergy}</span>}<span>{budgetLabel(profile)} target</span></div><DayTabs plan={plan} selectedDay={selectedDay} onSelect={setSelectedDay} /><DaySummary day={day} targets={targets} /><MealsSection title={`Meals for ${day.day}`} eyebrow="PROPOSED DAY" meals={day.meals} onOpen={onMeal} /><div className="approval-card"><div><span className="eyebrow">APPROVAL GATE</span><h2>Does this week work for you?</h2><p>Approval freezes this meal set and generates the grocery list from these exact ingredients and quantities.</p></div><div><button className="outline-btn" onClick={onRegenerate}>Try another plan</button><button className="approve-btn" onClick={onApprove}>Approve plan & build groceries →</button></div></div></section>{selectedMeal && <MealModal meal={selectedMeal} saved={false} onSave={() => {}} onClose={closeMeal} reviewMode />}</main>;
+  const averageProtein = Math.round(plan.reduce((total, item) => total + sum(item.meals, "protein"), 0) / plan.length);
+  const matchingDays = plan.filter((item) => Math.abs(sum(item.meals, "calories") - targets.calories) <= Math.max(100, targets.calories * .05)).length;
+
+  return (
+    <main className="review-screen">
+      <header className="review-top">
+        <button className="brand" onClick={onEdit}><span className="brand-mark">✳</span> NutriPlan</button>
+        <div className="workflow-steps" aria-label="Planning progress"><span className="done">✓ Profile</span><i /><span className="active">2 Review</span><i /><span>3 Groceries</span></div>
+        <button className="text-btn" onClick={onEdit}>Edit profile</button>
+      </header>
+
+      <section className="review-content">
+        <div className="review-intro">
+          <div className="review-heading">
+            <span className="eyebrow">YOUR PROPOSED WEEK</span>
+            <h1>Review your week, {profile.name}.</h1>
+            <p>Start with the seven-day overview. Choose any day to inspect its meals and open a recipe.</p>
+            <div className="plan-context" aria-label="Plan preferences">
+              <span>{profile.diet}</span>
+              <span>{profile.allergies.length || profile.customAllergy ? `${profile.allergies.length + (profile.customAllergy ? 1 : 0)} exclusions` : "No allergies"}</span>
+              <span>{budgetLabel(profile)} target</span>
+            </div>
+          </div>
+          <aside className="plan-fit" aria-label="Weekly nutrition fit">
+            <div className="fit-heading"><span>✓</span><div><strong>Plan fits your targets</strong><small>{matchingDays} of 7 days are within range</small></div></div>
+            <div className="fit-stats"><span><b>{weeklyAverage.toLocaleString()}</b><small>avg. kcal</small></span><span><b>{averageProtein}g</b><small>avg. protein</small></span><span><b>28</b><small>meals</small></span></div>
+          </aside>
+        </div>
+
+        <PlanWorkspace plan={plan} targets={targets} selectedDay={selectedDay} onSelectDay={setSelectedDay} onOpenMeal={onMeal} />
+
+        <section className="approval-card">
+          <div className="approval-copy"><span className="approval-check">✓</span><div><span className="eyebrow">NEXT STEP</span><h2>Ready to turn this into groceries?</h2><p>Approving locks this version and creates one consolidated grocery list. Nothing is ordered yet.</p></div></div>
+          <div className="approval-actions"><button className="outline-btn" onClick={onRegenerate}>Generate a different week</button><button className="approve-btn" onClick={onApprove}>Approve week & create groceries →</button></div>
+        </section>
+      </section>
+
+      {selectedMeal && <MealModal meal={selectedMeal} saved={false} onSave={() => {}} onClose={closeMeal} reviewMode />}
+    </main>
+  );
 }
 
-function DayTabs({ plan, selectedDay, onSelect }: { plan: PlanDay[]; selectedDay: string; onSelect: (day: string) => void }) {
-  return <div className="day-tabs" role="tablist" aria-label="Days of the week">{plan.map((day) => <button role="tab" aria-selected={selectedDay === day.day} onClick={() => onSelect(day.day)} className={selectedDay === day.day ? "selected" : ""} key={day.day}><span>{day.day}</span><b>{day.date}</b></button>)}</div>;
+function PlanWorkspace({ plan, targets, selectedDay, onSelectDay, onOpenMeal }: { plan: PlanDay[]; targets: Targets; selectedDay: string; onSelectDay: (day: string) => void; onOpenMeal: (meal: Meal) => void }) {
+  const activeDay = plan.find((item) => item.day === selectedDay) ?? plan[0];
+
+  return (
+    <div className="plan-workspace">
+      <WeekOverview plan={plan} selectedDay={selectedDay} onSelectDay={onSelectDay} />
+      <DayPlan day={activeDay} targets={targets} onOpenMeal={onOpenMeal} />
+    </div>
+  );
 }
 
-function DaySummary({ day, targets }: { day: PlanDay; targets: Targets }) {
-  return <div className="day-summary"><span><b>{sum(day.meals, "calories")}</b> kcal planned</span><span><b>{sum(day.meals, "protein")}g</b> protein</span><span><b>~{day.meals.reduce((total, meal) => total + Number(meal.prep.split(" ")[0]), 0)} min</b> total prep</span><i>Target: {targets.calories} kcal · {targets.protein}g protein</i></div>;
+function WeekOverview({ plan, selectedDay, onSelectDay }: { plan: PlanDay[]; selectedDay: string; onSelectDay: (day: string) => void }) {
+  return (
+    <aside className="week-overview">
+      <div className="week-overview-heading"><div><span className="eyebrow">WEEK AT A GLANCE</span><h2>Your seven days</h2></div><small>Choose a day</small></div>
+      <nav className="week-day-list" aria-label="Days in this meal plan">
+        {plan.map((day) => {
+          const dinner = day.meals.find((meal) => meal.type === "Dinner");
+          return (
+            <button key={day.day} aria-label={`${dayName(day.day)}, August ${day.date}; dinner: ${dinner?.name}; ${sum(day.meals, "calories").toLocaleString()} calories`} aria-pressed={selectedDay === day.day} className={selectedDay === day.day ? "selected" : ""} onClick={() => onSelectDay(day.day)}>
+              <span className="week-date"><b>{day.day}</b><small>Aug {day.date}</small></span>
+              <span className="week-dinner"><small>Dinner</small><b>{dinner?.name}</b></span>
+              <span className="week-kcal"><b>{sum(day.meals, "calories").toLocaleString()}</b><small>kcal</small></span>
+              <i aria-hidden="true">›</i>
+            </button>
+          );
+        })}
+      </nav>
+    </aside>
+  );
+}
+
+function DayPlan({ day, targets, onOpenMeal }: { day: PlanDay; targets: Targets; onOpenMeal: (meal: Meal) => void }) {
+  const calories = sum(day.meals, "calories");
+  const protein = sum(day.meals, "protein");
+  const prepMinutes = day.meals.reduce((total, meal) => total + Number(meal.prep.split(" ")[0]), 0);
+  const calorieDifference = calories - targets.calories;
+
+  return (
+    <section className="day-plan" aria-live="polite">
+      <header className="day-plan-heading">
+        <div><span className="eyebrow">{dayName(day.day).toUpperCase()} · AUGUST {day.date}</span><h2>{dayName(day.day)}&apos;s meals</h2><p>{day.meals.length} meals · about {prepMinutes} minutes total prep</p></div>
+        <span className="fit-badge">✓ On target</span>
+      </header>
+
+      <div className="day-targets">
+        <NutritionTarget label="Calories" value={`${calories.toLocaleString()} kcal`} detail={`${Math.abs(calorieDifference)} ${calorieDifference >= 0 ? "over" : "under"} target`} progress={calories / targets.calories} />
+        <NutritionTarget label="Protein" value={`${protein}g`} detail={`${targets.protein}g target`} progress={protein / targets.protein} />
+      </div>
+
+      <div className="review-meal-list">
+        {day.meals.map((meal) => (
+          <article className="review-meal-row" key={meal.id}>
+            <div className={`review-meal-icon ${meal.tone}`} aria-hidden="true">{meal.icon}</div>
+            <div className="review-meal-time"><strong>{meal.type}</strong><span>{meal.time}</span></div>
+            <div className="review-meal-copy"><h3>{meal.name}</h3><p>{meal.description}</p><span>{meal.calories} kcal <i>•</i> {meal.protein}g protein <i>•</i> {meal.prep}</span></div>
+            <button className="recipe-link" onClick={() => onOpenMeal(meal)} aria-label={`View recipe for ${meal.name}`}>Recipe <span>→</span></button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function NutritionTarget({ label, value, detail, progress }: { label: string; value: string; detail: string; progress: number }) {
+  return (
+    <div className="nutrition-target">
+      <div><span>{label}</span><strong>{value}</strong></div>
+      <progress aria-label={`${label}: ${value}, ${detail}`} value={Math.min(progress, 1)} max={1} />
+      <small>{detail}</small>
+    </div>
+  );
 }
 
 function MealsSection({ title, eyebrow, meals, savedMeals = [], onSave, onOpen, onFullWeek }: { title: string; eyebrow: string; meals: Meal[]; savedMeals?: string[]; onSave?: (name: string) => void; onOpen: (meal: Meal) => void; onFullWeek?: () => void }) {
@@ -182,4 +283,8 @@ function MealModal({ meal, saved, onSave, onClose, reviewMode = false }: { meal:
 
 function sum(meals: Meal[], key: "calories" | "protein") {
   return meals.reduce((total, meal) => total + meal[key], 0);
+}
+
+function dayName(day: string) {
+  return ({ Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" } as Record<string, string>)[day] ?? day;
 }
